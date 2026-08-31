@@ -1,0 +1,2 @@
+# Unica dependencia: cliente HTTP para hablar con la API de transcripcion.
+requests>=2.31

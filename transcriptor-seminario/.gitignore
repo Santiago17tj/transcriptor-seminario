@@ -1,0 +1,8 @@
+config.json
+*_crudo.json
+Transcripcion_Sesion_*.md
+__pycache__/
+*.m4a
+*.mp3
+*.wav
+*.ogg

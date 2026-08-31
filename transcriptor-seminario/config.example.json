@@ -1,0 +1,12 @@
+{
+  "_comentario": "Copia este archivo como config.json y pega tu clave. config.json NO se comparte ni se sube a ningun repositorio.",
+  "servicio": "deepgram",
+  "idioma": "es",
+  "modelo": "nova-3",
+  "modelo_local": "small",
+  "umbral_confianza": 0.6,
+  "api_keys": {
+    "deepgram": "PEGA_AQUI_TU_CLAVE_DE_DEEPGRAM",
+    "assemblyai": ""
+  }
+}

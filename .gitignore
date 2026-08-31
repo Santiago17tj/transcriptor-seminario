@@ -1,0 +1,36 @@
+# --- Secretos: NUNCA subir estos archivos ---
+.env
+.env.*
+!.env.example
+config.json
+transcriptor-seminario/config.json
+
+# --- Dependencias y compilados ---
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+__pycache__/
+*.py[cod]
+
+# --- Salidas de trabajo ---
+*_crudo.json
+Transcripcion_Sesion_*.md
+
+# --- Audio: las grabaciones de las sesiones no van al repositorio ---
+*.m4a
+*.mp3
+*.wav
+*.ogg
+*.opus
+*.aac
+*.webm
+
+# --- Varios ---
+.vercel
+.claude/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,64 @@
+# Vocabulario tecnico del proyecto de grado (Seminario de Investigacion, UIS).
+# Un termino por linea o separados por comas. Las lineas que empiezan con # se ignoran.
+# Estos terminos se envian al servicio de transcripcion para que los reconozca mejor.
+
+# --- Marco taxonomico ---
+taxonomia
+taxonomico
+meta-caracteristica
+dimension
+caracteristica
+Nickerson
+Varshney
+Muntermann
+
+# --- Autores y referencias ---
+Weyns
+Kephart
+Chess
+Gasser
+Almeida
+Kitchenham
+Charters
+
+# --- Computacion autonomica ---
+MAPE-K
+computacion autonomica
+autonomic manager
+touchpoint
+knowledge source
+manual manager
+quiescencia
+fail-safe
+
+# --- Dimensiones propias de la taxonomia ---
+trazabilidad evolutiva
+gobernanza tecnologica
+proveniencia del cambio
+reversibilidad
+impacto organizacional
+alcance de control
+nivel de autonomia
+auto-adaptacion
+auto-evolucion
+arquitecturas auto-evolutivas
+retroalimentacion en produccion
+
+# --- Metodologia y contexto academico ---
+Sistemas de Informacion
+estado del arte
+corpus documental
+revision sistematica
+acta
+seminario
+objetivo especifico
+enfoque
+lineamientos conceptuales
+
+# --- Tecnologia ---
+ISO 25010
+observabilidad
+adaptacion en runtime
+modelos de lenguaje
+LLM
+Claude
