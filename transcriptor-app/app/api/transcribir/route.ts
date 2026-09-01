@@ -1,14 +1,16 @@
 /**
- * Recibe el audio (por FormData o por URL de Vercel Blob), lo manda a Deepgram
- * con diarizacion y vocabulario del proyecto, y devuelve las intervenciones
- * ya normalizadas.
+ * Recibe la peticion de transcripcion.
  *
- * Dos modos de recibir el audio:
- *   1. FormData con campo "audio" (local / archivos pequenos).
- *   2. JSON con { url, codigo } (cuando el audio se subio a Vercel Blob).
+ * Soporta dos modos:
+ *   1. Modo Asincrono (Produccion / Vercel):
+ *      - El audio ya se subio a Vercel Blob.
+ *      - Enviamos la URL a Deepgram con un parametro 'callback'.
+ *      - Deepgram responde de inmediato (< 1 seg) con el request_id.
+ *      - Respondemos al cliente con { status: "procesando", id }.
+ *      - Asi NUNCA superamos el limite de 60 segundos de Vercel Hobby.
  *
- * La clave de Deepgram vive SOLO aqui, en el servidor, como variable de entorno.
- * Nunca viaja al celular, asi que nadie puede sacarla de la app.
+ *   2. Modo Sincrono (Local / Archivos directos):
+ *      - En local o con FormData, enviamos el audio directo a Deepgram y esperamos.
  */
 
 import { NextResponse } from "next/server";
@@ -16,87 +18,19 @@ import { del } from "@vercel/blob";
 import { VOCABULARIO } from "@/lib/vocabulario";
 import {
   agruparTurnos,
-  letraHablante,
+  normalizarDeepgram,
   type Intervencion,
-  type Palabra,
+  type RespuestaDeepgram,
 } from "@/lib/formato";
 
 export const runtime = "nodejs";
-export const maxDuration = 300; // segundos: una sesion de 2 h tarda 1-3 min
+export const maxDuration = 300; // segundos
 
-/** Tamano maximo que acepta una funcion de Vercel. */
+/** Tamano maximo que acepta una funcion de Vercel en modo directo. */
 const LIMITE_BYTES = 95 * 1024 * 1024;
-
-type RespuestaDeepgram = {
-  results?: {
-    utterances?: {
-      start?: number;
-      end?: number;
-      speaker?: number;
-      transcript?: string;
-      words?: { word?: string; punctuated_word?: string; confidence?: number }[];
-    }[];
-    channels?: {
-      alternatives?: {
-        words?: {
-          word?: string;
-          punctuated_word?: string;
-          confidence?: number;
-          speaker?: number;
-          start?: number;
-        }[];
-      }[];
-    }[];
-  };
-};
 
 function error(mensaje: string, status: number, detalle?: string) {
   return NextResponse.json({ error: mensaje, detalle }, { status });
-}
-
-/** Convierte la respuesta de Deepgram al formato que usa la app. */
-function normalizar(data: RespuestaDeepgram): Intervencion[] {
-  const resultados = data.results ?? {};
-  const intervenciones: Intervencion[] = [];
-
-  for (const u of resultados.utterances ?? []) {
-    const palabras: Palabra[] = (u.words ?? []).map((w) => ({
-      texto: w.punctuated_word || w.word || "",
-      confianza: typeof w.confidence === "number" ? w.confidence : 1,
-    }));
-    intervenciones.push({
-      inicio: u.start ?? 0,
-      fin: u.end ?? u.start ?? 0,
-      idHablante: letraHablante(u.speaker ?? 0),
-      palabras,
-      textoPlano: (u.transcript ?? "").trim(),
-    });
-  }
-  if (intervenciones.length > 0) return intervenciones;
-
-  // Respaldo: si no vinieron utterances, agrupo las palabras por hablante.
-  const alt = resultados.channels?.[0]?.alternatives?.[0];
-  let actual: Intervencion | null = null;
-  for (const w of alt?.words ?? []) {
-    const hablante = letraHablante(w.speaker ?? 0);
-    if (!actual || actual.idHablante !== hablante) {
-      actual = {
-        inicio: w.start ?? 0,
-        idHablante: hablante,
-        palabras: [],
-        textoPlano: "",
-      };
-      intervenciones.push(actual);
-    }
-    actual.palabras.push({
-      texto: w.punctuated_word || w.word || "",
-      confianza: typeof w.confidence === "number" ? w.confidence : 1,
-    });
-  }
-  for (const i of intervenciones) {
-    i.textoPlano = i.palabras.map((p) => p.texto).join(" ").trim();
-  }
-  return intervenciones;
 }
 
 /**
@@ -141,7 +75,7 @@ async function extraerDatos(request: Request): Promise<
       error: error(
         `El audio pesa ${mb} MB y el máximo es 95 MB.`,
         413,
-        "Vuelve a exportarlo con menor calidad, pártilo en dos, o usa el script de escritorio, que no tiene ese límite.",
+        "Vuelve a exportarlo con menor calidad, pártelo en dos, o usa el script de escritorio, que no tiene ese límite.",
       ),
     };
   }
@@ -182,20 +116,35 @@ export async function POST(request: Request) {
   const modelo = process.env.DEEPGRAM_MODELO?.trim() || "nova-3";
   const idioma = process.env.DEEPGRAM_IDIOMA?.trim() || "es";
 
-  const construirUrl = (conVocabulario: boolean) => {
+  // Identificar el host publico para el webhook callback
+  const host =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    process.env.VERCEL_URL ||
+    "";
+  const esLocal = host.includes("localhost") || host.includes("127.0.0.1");
+
+  // Generamos un ID unico para esta transcripcion
+  const transcripcionId = crypto.randomUUID();
+
+  const construirUrl = (conVocabulario: boolean, conCallback: boolean) => {
     const p = new URLSearchParams({
       model: modelo,
       language: idioma,
-      // OJO: el parametro viejo 'diarize=true' ya no hace nada. Deepgram lo
-      // acepta sin quejarse y devuelve todo como un solo hablante. La
-      // separacion de voces se activa con 'diarize_model'.
       diarize_model: "latest",
       punctuate: "true",
       smart_format: "true",
       utterances: "true",
     });
+
+    if (conCallback && !esLocal && datos.modo === "blob") {
+      const proto = "https";
+      const cb = `${proto}://${host}/api/callback?id=${transcripcionId}&audioUrl=${encodeURIComponent(datos.url)}`;
+      p.append("callback", cb);
+      p.append("callback_method", "post");
+    }
+
     if (conVocabulario) {
-      // nova-3 usa 'keyterm'; los modelos anteriores usan 'keywords'.
       const campo = modelo.startsWith("nova-3") ? "keyterm" : "keywords";
       for (const t of VOCABULARIO) {
         p.append(campo, campo === "keywords" ? `${t}:2` : t);
@@ -204,19 +153,19 @@ export async function POST(request: Request) {
     return `https://api.deepgram.com/v1/listen?${p.toString()}`;
   };
 
-  // Preparar la peticion a Deepgram segun el modo.
+  // Si estamos en produccion con modo Blob, usamos Deepgram Asincrono (Callback)
+  const usarCallback = !esLocal && datos.modo === "blob";
+
   let cabeceras: Record<string, string>;
   let cuerpoDeepgram: BodyInit;
 
   if (datos.modo === "blob") {
-    // Modo Blob: enviar la URL para que Deepgram descargue el audio.
     cabeceras = {
       Authorization: `Token ${clave}`,
       "Content-Type": "application/json",
     };
     cuerpoDeepgram = JSON.stringify({ url: datos.url });
   } else {
-    // Modo directo: enviar los bytes crudos.
     const buffer = Buffer.from(await datos.audio.arrayBuffer());
     cabeceras = {
       Authorization: `Token ${clave}`,
@@ -228,19 +177,17 @@ export async function POST(request: Request) {
   let avisoVocabulario: string | null = null;
   let respuesta: Response;
   try {
-    respuesta = await fetch(construirUrl(true), {
+    respuesta = await fetch(construirUrl(true, usarCallback), {
       method: "POST",
       headers: cabeceras,
       body: cuerpoDeepgram,
     });
 
-    // Si el modelo no acepta el vocabulario en este idioma, reintento sin el.
     if (respuesta.status === 400) {
       avisoVocabulario =
         "Deepgram rechazó la lista de vocabulario técnico con este modelo, " +
-        "así que la transcripción se hizo sin ella. Los términos del proyecto " +
-        "pueden salir peor escritos.";
-      respuesta = await fetch(construirUrl(false), {
+        "así que la transcripción se hizo sin ella.";
+      respuesta = await fetch(construirUrl(false, usarCallback), {
         method: "POST",
         headers: cabeceras,
         body: cuerpoDeepgram,
@@ -252,16 +199,6 @@ export async function POST(request: Request) {
       502,
       e instanceof Error ? e.message : String(e),
     );
-  }
-
-  // Si usamos Blob, borrar el archivo temporal despues de transcribir.
-  if (datos.modo === "blob") {
-    try {
-      await del(datos.url);
-    } catch {
-      // Si no se pudo borrar (ej: token invalido, ya borrado), no importa.
-      // Vercel Blob no cobra por almacenamiento excesivo en el plan gratuito.
-    }
   }
 
   if (respuesta.status === 401) {
@@ -287,8 +224,21 @@ export async function POST(request: Request) {
     );
   }
 
+  // Si usamos Callback en produccion, Deepgram responde inmediatamente
+  if (usarCallback) {
+    return NextResponse.json({
+      status: "procesando",
+      id: transcripcionId,
+    });
+  }
+
+  // Modo Sincrono (Local): procesar resultado directamente
+  if (datos.modo === "blob") {
+    await del(datos.url).catch(() => {});
+  }
+
   const data = (await respuesta.json()) as RespuestaDeepgram;
-  const intervenciones = agruparTurnos(normalizar(data));
+  const intervenciones = agruparTurnos(normalizarDeepgram(data));
 
   if (intervenciones.length === 0) {
     return error(
@@ -299,6 +249,7 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({
+    status: "completado",
     intervenciones,
     aviso: avisoVocabulario,
     meta: {

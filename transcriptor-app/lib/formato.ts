@@ -336,3 +336,72 @@ export function nombreArchivo(numero: string): string {
   const limpio = (numero || "0").replace(/[^\w.-]+/g, "_");
   return `Transcripcion_Sesion_${limpio}.md`;
 }
+
+export type RespuestaDeepgram = {
+  results?: {
+    utterances?: {
+      start?: number;
+      end?: number;
+      speaker?: number;
+      transcript?: string;
+      words?: { word?: string; punctuated_word?: string; confidence?: number }[];
+    }[];
+    channels?: {
+      alternatives?: {
+        words?: {
+          word?: string;
+          punctuated_word?: string;
+          confidence?: number;
+          speaker?: number;
+          start?: number;
+        }[];
+      }[];
+    }[];
+  };
+};
+
+/** Convierte la respuesta bruta de Deepgram al formato que usa la app. */
+export function normalizarDeepgram(data: RespuestaDeepgram): Intervencion[] {
+  const resultados = data.results ?? {};
+  const intervenciones: Intervencion[] = [];
+
+  for (const u of resultados.utterances ?? []) {
+    const palabras: Palabra[] = (u.words ?? []).map((w) => ({
+      texto: w.punctuated_word || w.word || "",
+      confianza: typeof w.confidence === "number" ? w.confidence : 1,
+    }));
+    intervenciones.push({
+      inicio: u.start ?? 0,
+      fin: u.end ?? u.start ?? 0,
+      idHablante: letraHablante(u.speaker ?? 0),
+      palabras,
+      textoPlano: (u.transcript ?? "").trim(),
+    });
+  }
+  if (intervenciones.length > 0) return intervenciones;
+
+  // Respaldo: si no vinieron utterances, agrupo las palabras por hablante.
+  const alt = resultados.channels?.[0]?.alternatives?.[0];
+  let actual: Intervencion | null = null;
+  for (const w of alt?.words ?? []) {
+    const hablante = letraHablante(w.speaker ?? 0);
+    if (!actual || actual.idHablante !== hablante) {
+      actual = {
+        inicio: w.start ?? 0,
+        idHablante: hablante,
+        palabras: [],
+        textoPlano: "",
+      };
+      intervenciones.push(actual);
+    }
+    actual.palabras.push({
+      texto: w.punctuated_word || w.word || "",
+      confianza: typeof w.confidence === "number" ? w.confidence : 1,
+    });
+  }
+  for (const i of intervenciones) {
+    i.textoPlano = i.palabras.map((p) => p.texto).join(" ").trim();
+  }
+  return intervenciones;
+}
+

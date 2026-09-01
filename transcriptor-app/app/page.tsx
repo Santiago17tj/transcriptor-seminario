@@ -155,6 +155,8 @@ export default function Pagina() {
         });
 
         let cuerpo: {
+          status?: "procesando" | "completado" | "error";
+          id?: string;
           intervenciones?: Intervencion[];
           aviso?: string | null;
           meta?: Record<string, string | number>;
@@ -180,7 +182,7 @@ export default function Pagina() {
           return;
         }
 
-        if (res.status !== 200 || !cuerpo.intervenciones) {
+        if (res.status !== 200 || cuerpo.error) {
           setError({
             texto: cuerpo.error ?? "No se pudo transcribir el audio.",
             detalle: cuerpo.detalle,
@@ -189,12 +191,58 @@ export default function Pagina() {
           return;
         }
 
-        setIntervenciones(cuerpo.intervenciones);
-        setAviso(cuerpo.aviso ?? null);
-        setMeta(cuerpo.meta ?? {});
-        setNombres({});
-        setPaso("hablantes");
-        return;
+        // Si el backend inicio procesamiento asincrono con Deepgram callback:
+        if (cuerpo.status === "procesando" && cuerpo.id) {
+          const id = cuerpo.id;
+          const inicioPoll = Date.now();
+          const MAX_TIEMPO_MS = 15 * 60 * 1000; // 15 minutos maximo
+
+          while (Date.now() - inicioPoll < MAX_TIEMPO_MS) {
+            await new Promise((r) => setTimeout(r, 3000));
+            try {
+              const resEstado = await fetch(`/api/estado?id=${id}`);
+              if (!resEstado.ok) continue;
+              const estado = await resEstado.json();
+
+              if (estado.status === "completado" && estado.intervenciones) {
+                setIntervenciones(estado.intervenciones);
+                setAviso(estado.aviso ?? null);
+                setMeta(estado.meta ?? {});
+                setNombres({});
+                setPaso("hablantes");
+                return;
+              }
+
+              if (estado.status === "error" || estado.error) {
+                setError({
+                  texto: estado.error ?? "No se pudo transcribir el audio.",
+                  detalle: estado.detalle,
+                });
+                setPaso("inicio");
+                return;
+              }
+            } catch {
+              // error de red puntual al consultar estado, seguimos esperando
+            }
+          }
+
+          setError({
+            texto: "La transcripción tardó más de 15 minutos y se canceló.",
+            detalle: "Intenta nuevamente o usa el script de escritorio.",
+          });
+          setPaso("inicio");
+          return;
+        }
+
+        // Modo Sincrono (Local)
+        if (cuerpo.intervenciones) {
+          setIntervenciones(cuerpo.intervenciones);
+          setAviso(cuerpo.aviso ?? null);
+          setMeta(cuerpo.meta ?? {});
+          setNombres({});
+          setPaso("hablantes");
+          return;
+        }
       } catch (e) {
         const msg =
           e instanceof Error && e.name === "TimeoutError"
