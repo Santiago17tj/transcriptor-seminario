@@ -297,7 +297,7 @@ export default function Pagina() {
             <input
               ref={inputArchivoRef}
               type="file"
-              accept="audio/*,.m4a,.mp3,.wav,.ogg,.opus,.aac,.webm"
+              accept="audio/*,video/*,.m4a,.mp3,.wav,.ogg,.opus,.aac,.webm,.mpeg,.mpg,.mp4,.flac,.wma"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
