@@ -124,6 +124,7 @@ export default function Pagina() {
     }
 
     // --- Intento 1: subir via Vercel Blob ---
+    let blobUrl: string | null = null;
     try {
       setMensaje("Subiendo el audio…");
       const { upload } = await import("@vercel/blob/client");
@@ -136,35 +137,76 @@ export default function Pagina() {
           if (pct >= 100) setMensaje("Audio subido. Transcribiendo…");
         },
       });
+      blobUrl = blob.url;
+    } catch {
+      // Blob no esta configurado (falta BLOB_READ_WRITE_TOKEN) o fallo la
+      // subida. Caemos al metodo directo mas abajo.
+    }
 
-      // El audio ya esta en Blob: enviar solo la URL al servidor.
-      setMensaje("Deepgram está escuchando la grabación…");
-      const res = await fetch("/api/transcribir", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: blob.url, codigo: codigo.trim() }),
-        signal: AbortSignal.timeout(15 * 60 * 1000),
-      });
+    // Si el Blob se subio bien, enviar solo la URL al servidor.
+    if (blobUrl) {
+      try {
+        setMensaje("Deepgram está escuchando la grabación…");
+        const res = await fetch("/api/transcribir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: blobUrl, codigo: codigo.trim() }),
+          signal: AbortSignal.timeout(15 * 60 * 1000),
+        });
 
-      const cuerpo = await res.json();
-      if (res.status !== 200 || !cuerpo.intervenciones) {
+        let cuerpo: {
+          intervenciones?: Intervencion[];
+          aviso?: string | null;
+          meta?: Record<string, string | number>;
+          error?: string;
+          detalle?: string;
+        };
+        try {
+          cuerpo = await res.json();
+        } catch {
+          // Vercel devolvio HTML (ej: 504 timeout) en vez de JSON.
+          setError({
+            texto:
+              res.status === 504
+                ? "La transcripción tardó demasiado y Vercel la cortó."
+                : `El servidor respondió con error ${res.status}.`,
+            detalle:
+              res.status === 504
+                ? "El audio es muy largo para el plan actual de Vercel. " +
+                  "Prueba con un audio más corto o usa el script de escritorio."
+                : "Revisa los logs en el panel de Vercel para más detalles.",
+          });
+          setPaso("inicio");
+          return;
+        }
+
+        if (res.status !== 200 || !cuerpo.intervenciones) {
+          setError({
+            texto: cuerpo.error ?? "No se pudo transcribir el audio.",
+            detalle: cuerpo.detalle,
+          });
+          setPaso("inicio");
+          return;
+        }
+
+        setIntervenciones(cuerpo.intervenciones);
+        setAviso(cuerpo.aviso ?? null);
+        setMeta(cuerpo.meta ?? {});
+        setNombres({});
+        setPaso("hablantes");
+        return;
+      } catch (e) {
+        const msg =
+          e instanceof Error && e.name === "TimeoutError"
+            ? "La transcripción tardó demasiado y se canceló."
+            : "Se perdió la conexión mientras se transcribía.";
         setError({
-          texto: cuerpo.error ?? "No se pudo transcribir el audio.",
-          detalle: cuerpo.detalle,
+          texto: msg,
+          detalle: "Revisa la conexión a internet e inténtalo de nuevo.",
         });
         setPaso("inicio");
         return;
       }
-
-      setIntervenciones(cuerpo.intervenciones);
-      setAviso(cuerpo.aviso ?? null);
-      setMeta(cuerpo.meta ?? {});
-      setNombres({});
-      setPaso("hablantes");
-      return;
-    } catch {
-      // Blob no esta configurado (falta BLOB_READ_WRITE_TOKEN) o fallo la
-      // subida. Caemos al metodo directo.
     }
 
     // --- Intento 2: enviar directo por FormData (modo local) ---
