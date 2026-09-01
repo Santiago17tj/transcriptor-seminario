@@ -101,7 +101,16 @@ export default function Pagina() {
     });
   }, [intervenciones, nombres, numero, fecha, meta]);
 
-  const transcribir = () => {
+  /**
+   * Envia la transcripcion al servidor.
+   *
+   * Intenta dos caminos:
+   *   1. Subir el audio a Vercel Blob y enviar solo la URL (evita el limite
+   *      de 4.5 MB de las funciones serverless de Vercel).
+   *   2. Si Blob no esta configurado, envia el archivo directamente por
+   *      FormData (funciona siempre en local).
+   */
+  const transcribir = async () => {
     if (!archivo) return;
     setError(null);
     setProgreso(0);
@@ -114,6 +123,51 @@ export default function Pagina() {
       // sin almacenamiento: seguimos igual
     }
 
+    // --- Intento 1: subir via Vercel Blob ---
+    try {
+      setMensaje("Subiendo el audio…");
+      const { upload } = await import("@vercel/blob/client");
+      const blob = await upload(archivo.name, archivo, {
+        access: "public",
+        handleUploadUrl: "/api/subir",
+        onUploadProgress: (e) => {
+          const pct = Math.round(e.percentage);
+          setProgreso(pct);
+          if (pct >= 100) setMensaje("Audio subido. Transcribiendo…");
+        },
+      });
+
+      // El audio ya esta en Blob: enviar solo la URL al servidor.
+      setMensaje("Deepgram está escuchando la grabación…");
+      const res = await fetch("/api/transcribir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: blob.url, codigo: codigo.trim() }),
+        signal: AbortSignal.timeout(15 * 60 * 1000),
+      });
+
+      const cuerpo = await res.json();
+      if (res.status !== 200 || !cuerpo.intervenciones) {
+        setError({
+          texto: cuerpo.error ?? "No se pudo transcribir el audio.",
+          detalle: cuerpo.detalle,
+        });
+        setPaso("inicio");
+        return;
+      }
+
+      setIntervenciones(cuerpo.intervenciones);
+      setAviso(cuerpo.aviso ?? null);
+      setMeta(cuerpo.meta ?? {});
+      setNombres({});
+      setPaso("hablantes");
+      return;
+    } catch {
+      // Blob no esta configurado (falta BLOB_READ_WRITE_TOKEN) o fallo la
+      // subida. Caemos al metodo directo.
+    }
+
+    // --- Intento 2: enviar directo por FormData (modo local) ---
     const datos = new FormData();
     datos.append("audio", archivo);
     datos.append("codigo", codigo.trim());
@@ -142,10 +196,20 @@ export default function Pagina() {
       try {
         cuerpo = JSON.parse(xhr.responseText);
       } catch {
-        setError({
-          texto: "El servidor respondió algo que no se pudo leer.",
-          detalle: `Código ${xhr.status}.`,
-        });
+        if (xhr.status === 413) {
+          setError({
+            texto: "El audio es demasiado grande para el servidor.",
+            detalle:
+              "El plan gratuito de Vercel acepta hasta ~4.5 MB. " +
+              "Comprime el audio, pártelo en fragmentos más cortos, " +
+              "o usa el script de escritorio que no tiene ese límite.",
+          });
+        } else {
+          setError({
+            texto: "El servidor respondió algo que no se pudo leer.",
+            detalle: `Código ${xhr.status}.`,
+          });
+        }
         setPaso("inicio");
         return;
       }

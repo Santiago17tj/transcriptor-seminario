@@ -1,12 +1,18 @@
 /**
- * Recibe el audio desde el navegador, lo manda a Deepgram con diarizacion y
- * vocabulario del proyecto, y devuelve las intervenciones ya normalizadas.
+ * Recibe el audio (por FormData o por URL de Vercel Blob), lo manda a Deepgram
+ * con diarizacion y vocabulario del proyecto, y devuelve las intervenciones
+ * ya normalizadas.
+ *
+ * Dos modos de recibir el audio:
+ *   1. FormData con campo "audio" (local / archivos pequenos).
+ *   2. JSON con { url, codigo } (cuando el audio se subio a Vercel Blob).
  *
  * La clave de Deepgram vive SOLO aqui, en el servidor, como variable de entorno.
  * Nunca viaja al celular, asi que nadie puede sacarla de la app.
  */
 
 import { NextResponse } from "next/server";
+import { del } from "@vercel/blob";
 import { VOCABULARIO } from "@/lib/vocabulario";
 import {
   agruparTurnos,
@@ -93,6 +99,60 @@ function normalizar(data: RespuestaDeepgram): Intervencion[] {
   return intervenciones;
 }
 
+/**
+ * Detecta si el request viene con JSON (modo Blob) o FormData (modo directo).
+ */
+async function extraerDatos(request: Request): Promise<
+  | { modo: "blob"; url: string; codigo: string }
+  | { modo: "directo"; audio: Blob; codigo: string }
+  | { error: ReturnType<typeof error> }
+> {
+  const tipo = request.headers.get("content-type") ?? "";
+
+  // Modo Blob: el cliente envio un JSON con la URL del archivo.
+  if (tipo.includes("application/json")) {
+    let cuerpo: { url?: string; codigo?: string };
+    try {
+      cuerpo = await request.json();
+    } catch {
+      return { error: error("No se pudo leer la petición.", 400) };
+    }
+    if (!cuerpo.url || typeof cuerpo.url !== "string") {
+      return { error: error("Falta la URL del audio.", 400) };
+    }
+    return { modo: "blob", url: cuerpo.url, codigo: String(cuerpo.codigo ?? "") };
+  }
+
+  // Modo directo: el cliente envio FormData con el archivo.
+  let formulario: FormData;
+  try {
+    formulario = await request.formData();
+  } catch {
+    return { error: error("No se pudo leer el audio enviado.", 400) };
+  }
+
+  const audio = formulario.get("audio");
+  if (!(audio instanceof Blob) || audio.size === 0) {
+    return { error: error("No llegó ningún archivo de audio.", 400) };
+  }
+  if (audio.size > LIMITE_BYTES) {
+    const mb = Math.round(audio.size / (1024 * 1024));
+    return {
+      error: error(
+        `El audio pesa ${mb} MB y el máximo es 95 MB.`,
+        413,
+        "Vuelve a exportarlo con menor calidad, pártilo en dos, o usa el script de escritorio, que no tiene ese límite.",
+      ),
+    };
+  }
+
+  return {
+    modo: "directo",
+    audio,
+    codigo: String(formulario.get("codigo") ?? ""),
+  };
+}
+
 export async function POST(request: Request) {
   const clave = process.env.DEEPGRAM_API_KEY?.trim();
   if (!clave) {
@@ -103,17 +163,13 @@ export async function POST(request: Request) {
     );
   }
 
-  let formulario: FormData;
-  try {
-    formulario = await request.formData();
-  } catch {
-    return error("No se pudo leer el audio enviado.", 400);
-  }
+  const datos = await extraerDatos(request);
+  if ("error" in datos) return datos.error;
 
   // Codigo de acceso: solo se exige si el despliegue lo configuro.
   const esperado = process.env.CODIGO_ACCESO?.trim();
   if (esperado) {
-    const recibido = String(formulario.get("codigo") ?? "").trim();
+    const recibido = datos.codigo.trim();
     if (recibido !== esperado) {
       return error(
         "Código de acceso incorrecto.",
@@ -121,19 +177,6 @@ export async function POST(request: Request) {
         "Pídeselo a quien desplegó la aplicación.",
       );
     }
-  }
-
-  const audio = formulario.get("audio");
-  if (!(audio instanceof Blob) || audio.size === 0) {
-    return error("No llegó ningún archivo de audio.", 400);
-  }
-  if (audio.size > LIMITE_BYTES) {
-    const mb = Math.round(audio.size / (1024 * 1024));
-    return error(
-      `El audio pesa ${mb} MB y el máximo es 95 MB.`,
-      413,
-      "Vuelve a exportarlo con menor calidad, pártelo en dos, o usa el script de escritorio, que no tiene ese límite.",
-    );
   }
 
   const modelo = process.env.DEEPGRAM_MODELO?.trim() || "nova-3";
@@ -161,11 +204,26 @@ export async function POST(request: Request) {
     return `https://api.deepgram.com/v1/listen?${p.toString()}`;
   };
 
-  const cuerpo = Buffer.from(await audio.arrayBuffer());
-  const cabeceras = {
-    Authorization: `Token ${clave}`,
-    "Content-Type": audio.type || "application/octet-stream",
-  };
+  // Preparar la peticion a Deepgram segun el modo.
+  let cabeceras: Record<string, string>;
+  let cuerpoDeepgram: BodyInit;
+
+  if (datos.modo === "blob") {
+    // Modo Blob: enviar la URL para que Deepgram descargue el audio.
+    cabeceras = {
+      Authorization: `Token ${clave}`,
+      "Content-Type": "application/json",
+    };
+    cuerpoDeepgram = JSON.stringify({ url: datos.url });
+  } else {
+    // Modo directo: enviar los bytes crudos.
+    const buffer = Buffer.from(await datos.audio.arrayBuffer());
+    cabeceras = {
+      Authorization: `Token ${clave}`,
+      "Content-Type": datos.audio.type || "application/octet-stream",
+    };
+    cuerpoDeepgram = new Uint8Array(buffer);
+  }
 
   let avisoVocabulario: string | null = null;
   let respuesta: Response;
@@ -173,7 +231,7 @@ export async function POST(request: Request) {
     respuesta = await fetch(construirUrl(true), {
       method: "POST",
       headers: cabeceras,
-      body: new Uint8Array(cuerpo),
+      body: cuerpoDeepgram,
     });
 
     // Si el modelo no acepta el vocabulario en este idioma, reintento sin el.
@@ -185,7 +243,7 @@ export async function POST(request: Request) {
       respuesta = await fetch(construirUrl(false), {
         method: "POST",
         headers: cabeceras,
-        body: new Uint8Array(cuerpo),
+        body: cuerpoDeepgram,
       });
     }
   } catch (e) {
@@ -194,6 +252,16 @@ export async function POST(request: Request) {
       502,
       e instanceof Error ? e.message : String(e),
     );
+  }
+
+  // Si usamos Blob, borrar el archivo temporal despues de transcribir.
+  if (datos.modo === "blob") {
+    try {
+      await del(datos.url);
+    } catch {
+      // Si no se pudo borrar (ej: token invalido, ya borrado), no importa.
+      // Vercel Blob no cobra por almacenamiento excesivo en el plan gratuito.
+    }
   }
 
   if (respuesta.status === 401) {
