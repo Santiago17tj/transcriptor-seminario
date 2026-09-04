@@ -37,7 +37,10 @@ async function guardar(id: string, contenido: Record<string, unknown>) {
   // Si esto falla, el navegador se quedaria sondeando para siempre sin saber
   // por que. Se deja explotar para que quede en los registros de Vercel.
   const guardado = await put(rutaResultado(id), JSON.stringify(contenido), {
-    access: "public",
+    // Privado a proposito: este archivo lo escribe y lo lee el servidor con el
+    // token, nunca el navegador. No hay ninguna razon para publicarlo, y
+    // contiene lo que se dijo en la sesion.
+    access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "application/json",

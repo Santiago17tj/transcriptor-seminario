@@ -12,7 +12,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { list, del } from "@vercel/blob";
+import { list, del, get } from "@vercel/blob";
 import { esUuid } from "@/lib/seguridad";
 
 export const runtime = "nodejs";
@@ -50,12 +50,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ status: "procesando" });
     }
 
-    const res = await fetch(blob.url, { cache: "no-store" });
-    if (!res.ok) {
+    // Se lee con el SDK y no con un fetch a la URL: el resultado es privado,
+    // asi que solo se puede recuperar con el token del servidor.
+    const contenido = await get(blob.pathname, {
+      access: "private",
+      useCache: false,
+    });
+    if (!contenido || contenido.statusCode !== 200) {
       return NextResponse.json({ status: "procesando" });
     }
 
-    return NextResponse.json(await res.json());
+    const texto = await new Response(contenido.stream).text();
+    return NextResponse.json(JSON.parse(texto));
   } catch (e) {
     return NextResponse.json(
       {
