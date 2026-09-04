@@ -128,6 +128,30 @@ Queda en <http://localhost:3000>.
 | `components/` | Grabadora, identificación de hablantes y pantalla de resultado. |
 | `scripts/generar-iconos.mjs` | Genera los íconos de la app. Solo hay que correrlo si se cambia el diseño. |
 
+### Cómo está protegida
+
+La app es pública en internet, así que cada endpoint que gasta recursos comprueba
+quién llama:
+
+- **`/api/subir`** exige el código de acceso *antes* de entregar el permiso de
+  subida. Si se validara solo al transcribir, el archivo ya estaría subido y
+  cualquiera podría llenar el almacenamiento con audios de 100 MB.
+- **`/api/callback`** exige una firma en la URL. Deepgram no firma sus webhooks,
+  así que la firma se calcula aquí con la clave de Deepgram como secreto (no hace
+  falta configurar nada nuevo) y cubre el id, la URL del audio y si el vocabulario
+  se aplicó. Sin ella cualquiera podría escribir transcripciones falsas o pedir el
+  borrado de archivos ajenos.
+- **`/api/estado`** solo acepta identificadores con forma de UUID y compara el
+  nombre completo del archivo, no el prefijo. Con una búsqueda por prefijo, un id
+  de una sola letra devolvía la transcripción de otra persona.
+- **Los resultados no se borran al leerlos.** Los borra el navegador cuando ya los
+  tiene en pantalla, y el callback limpia a las 24 horas lo que quedó sin recoger.
+  Si se borraran al leerlos, una respuesta perdida en datos móviles destruiría la
+  transcripción y habría que volver a pagarla.
+
+Nada de esto sustituye al código de acceso: **configúralo siempre** en un
+despliegue público.
+
 ### Dos detalles que costaron encontrar
 
 - **La diarización se activa con `diarize_model=latest`, no con `diarize=true`.**

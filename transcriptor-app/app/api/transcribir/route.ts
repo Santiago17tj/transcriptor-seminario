@@ -19,9 +19,15 @@ import { VOCABULARIO } from "@/lib/vocabulario";
 import {
   agruparTurnos,
   normalizarDeepgram,
-  type Intervencion,
   type RespuestaDeepgram,
 } from "@/lib/formato";
+import {
+  codigoCorrecto,
+  esHostLocal,
+  esUrlDeBlob,
+  firmarCallback,
+  hostPublico,
+} from "@/lib/seguridad";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // segundos
@@ -53,6 +59,11 @@ async function extraerDatos(request: Request): Promise<
     }
     if (!cuerpo.url || typeof cuerpo.url !== "string") {
       return { error: error("Falta la URL del audio.", 400) };
+    }
+    // Solo se acepta un archivo de nuestro propio almacenamiento: si no, se
+    // podria hacer que Deepgram descargue cualquier direccion de internet.
+    if (!esUrlDeBlob(cuerpo.url)) {
+      return { error: error("La URL del audio no es válida.", 400) };
     }
     return { modo: "blob", url: cuerpo.url, codigo: String(cuerpo.codigo ?? "") };
   }
@@ -101,28 +112,21 @@ export async function POST(request: Request) {
   if ("error" in datos) return datos.error;
 
   // Codigo de acceso: solo se exige si el despliegue lo configuro.
-  const esperado = process.env.CODIGO_ACCESO?.trim();
-  if (esperado) {
-    const recibido = datos.codigo.trim();
-    if (recibido !== esperado) {
-      return error(
-        "Código de acceso incorrecto.",
-        401,
-        "Pídeselo a quien desplegó la aplicación.",
-      );
-    }
+  if (!codigoCorrecto(datos.codigo)) {
+    return error(
+      "Código de acceso incorrecto.",
+      401,
+      "Pídeselo a quien desplegó la aplicación.",
+    );
   }
 
   const modelo = process.env.DEEPGRAM_MODELO?.trim() || "nova-3";
   const idioma = process.env.DEEPGRAM_IDIOMA?.trim() || "es";
 
-  // Identificar el host publico para el webhook callback
-  const host =
-    request.headers.get("x-forwarded-host") ||
-    request.headers.get("host") ||
-    process.env.VERCEL_URL ||
-    "";
-  const esLocal = host.includes("localhost") || host.includes("127.0.0.1");
+  // Host publico al que Deepgram enviara el webhook. Se valida contra dominios
+  // propios: la cabecera llega desde fuera y no se puede tomar tal cual.
+  const host = hostPublico(request);
+  const esLocal = esHostLocal(host);
 
   // Generamos un ID unico para esta transcripcion
   const transcripcionId = crypto.randomUUID();
@@ -138,9 +142,19 @@ export async function POST(request: Request) {
     });
 
     if (conCallback && !esLocal && datos.modo === "blob") {
-      const proto = "https";
-      const cb = `${proto}://${host}/api/callback?id=${transcripcionId}&audioUrl=${encodeURIComponent(datos.url)}`;
-      p.append("callback", cb);
+      const sinVocabulario = !conVocabulario;
+      const firma = firmarCallback(
+        clave,
+        transcripcionId,
+        datos.url,
+        sinVocabulario,
+      );
+      const cb = new URL(`https://${host}/api/callback`);
+      cb.searchParams.set("id", transcripcionId);
+      cb.searchParams.set("audioUrl", datos.url);
+      if (sinVocabulario) cb.searchParams.set("sinVocab", "1");
+      cb.searchParams.set("firma", firma);
+      p.append("callback", cb.toString());
       p.append("callback_method", "post");
     }
 

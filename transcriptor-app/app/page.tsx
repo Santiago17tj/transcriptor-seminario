@@ -101,6 +101,15 @@ export default function Pagina() {
     });
   }, [intervenciones, nombres, numero, fecha, meta]);
 
+  /** Le dice al servidor que ya puede borrar el resultado guardado. */
+  const liberarResultado = (id: string) => {
+    fetch(`/api/estado?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(
+      () => {
+        // Si falla, el servidor lo limpiara solo a las 24 horas.
+      },
+    );
+  };
+
   /**
    * Envia la transcripcion al servidor.
    *
@@ -131,6 +140,9 @@ export default function Pagina() {
       const blob = await upload(archivo.name, archivo, {
         access: "public",
         handleUploadUrl: "/api/subir",
+        // El servidor comprueba el codigo ANTES de dar permiso de subida, para
+        // que nadie sin codigo pueda llenar el almacenamiento.
+        clientPayload: codigo.trim(),
         onUploadProgress: (e) => {
           const pct = Math.round(e.percentage);
           setProgreso(pct);
@@ -138,7 +150,17 @@ export default function Pagina() {
         },
       });
       blobUrl = blob.url;
-    } catch {
+    } catch (e) {
+      // Si el codigo esta mal, no tiene sentido reintentar por el otro camino:
+      // volveria a fallar despues de subir el archivo entero.
+      if (e instanceof Error && e.message.includes("Código de acceso")) {
+        setError({
+          texto: "Código de acceso incorrecto.",
+          detalle: "Pídeselo a quien desplegó la aplicación.",
+        });
+        setPaso("inicio");
+        return;
+      }
       // Blob no esta configurado (falta BLOB_READ_WRITE_TOKEN) o fallo la
       // subida. Caemos al metodo directo mas abajo.
     }
@@ -210,10 +232,15 @@ export default function Pagina() {
                 setMeta(estado.meta ?? {});
                 setNombres({});
                 setPaso("hablantes");
+                // El servidor ya no borra el resultado al leerlo: si la
+                // respuesta se perdiera en el camino, la transcripcion se
+                // perderia con ella. Se borra ahora, que ya esta a salvo.
+                liberarResultado(id);
                 return;
               }
 
               if (estado.status === "error" || estado.error) {
+                liberarResultado(id);
                 setError({
                   texto: estado.error ?? "No se pudo transcribir el audio.",
                   detalle: estado.detalle,
@@ -290,9 +317,9 @@ export default function Pagina() {
           setError({
             texto: "El audio es demasiado grande para el servidor.",
             detalle:
-              "El plan gratuito de Vercel acepta hasta ~4.5 MB. " +
-              "Comprime el audio, pártelo en fragmentos más cortos, " +
-              "o usa el script de escritorio que no tiene ese límite.",
+              "No se pudo usar la subida directa al almacenamiento, así que " +
+              "el archivo viajó por una ruta con límite de tamaño. Vuelve a " +
+              "intentarlo, o usa el script de escritorio si sigue fallando.",
           });
         } else {
           setError({
