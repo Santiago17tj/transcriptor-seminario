@@ -50,20 +50,28 @@ async function guardar(id: string, contenido: Record<string, unknown>) {
 }
 
 /**
- * Borra los resultados que quedaron sin recoger.
+ * Borra lo que quedo sin recoger.
  *
- * Normalmente el navegador los borra al recibirlos, pero si alguien cierra la
- * pestana antes de tiempo el archivo se quedaria ahi para siempre. Se limpia
- * aqui porque esto corre una vez por transcripcion, no en cada consulta.
+ * Dos casos: resultados que el navegador nunca llego a leer porque cerraron la
+ * pestana, y audios de transcripciones que fallaron a mitad de camino. Un audio
+ * de una sesion pesa decenas de megas, asi que no puede quedarse ahi para
+ * siempre. Se limpia aqui porque esto corre una vez por transcripcion, no en
+ * cada consulta.
  */
 async function limpiarHuerfanos() {
-  try {
-    const limite = Date.now() - HORAS_DE_VIDA * 60 * 60 * 1000;
-    const { blobs } = await list({ prefix: "resultados/", limit: 200 });
-    const viejos = blobs.filter((b) => new Date(b.uploadedAt).getTime() < limite);
-    if (viejos.length > 0) await del(viejos.map((b) => b.url));
-  } catch {
-    // La limpieza es oportunista: si falla, no debe tumbar el callback.
+  const limite = Date.now() - HORAS_DE_VIDA * 60 * 60 * 1000;
+  for (const prefijo of ["resultados/", ""]) {
+    try {
+      const { blobs } = await list({ prefix: prefijo, limit: 200 });
+      const viejos = blobs.filter(
+        (b) =>
+          new Date(b.uploadedAt).getTime() < limite &&
+          !b.pathname.startsWith("diagnostico/"),
+      );
+      if (viejos.length > 0) await del(viejos.map((b) => b.url));
+    } catch {
+      // La limpieza es oportunista: si falla, no debe tumbar el callback.
+    }
   }
 }
 
