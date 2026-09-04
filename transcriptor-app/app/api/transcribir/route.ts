@@ -14,7 +14,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { del } from "@vercel/blob";
+import { del, put } from "@vercel/blob";
 import { VOCABULARIO } from "@/lib/vocabulario";
 import {
   agruparTurnos,
@@ -169,6 +169,8 @@ export async function POST(request: Request) {
 
   let cabeceras: Record<string, string>;
   let cuerpoDeepgram: BodyInit;
+  let archivoEnAlmacen: string | null = null;
+  let urlAudioParaDeepgram: string | null = null;
 
   if (datos.modo === "blob") {
     // A Deepgram no se le pasa la URL del almacenamiento, porque si el almacen
@@ -180,13 +182,14 @@ export async function POST(request: Request) {
     enlace.searchParams.set("archivo", archivo);
     enlace.searchParams.set("firma", firmarDescarga(clave, archivo));
 
+    archivoEnAlmacen = archivo;
+    urlAudioParaDeepgram = esLocal ? datos.url : enlace.toString();
+
     cabeceras = {
       Authorization: `Token ${clave}`,
       "Content-Type": "application/json",
     };
-    cuerpoDeepgram = JSON.stringify({
-      url: esLocal ? datos.url : enlace.toString(),
-    });
+    cuerpoDeepgram = JSON.stringify({ url: urlAudioParaDeepgram });
   } else {
     const buffer = Buffer.from(await datos.audio.arrayBuffer());
     cabeceras = {
@@ -248,6 +251,31 @@ export async function POST(request: Request) {
 
   // Si usamos Callback en produccion, Deepgram responde inmediatamente
   if (usarCallback) {
+    // Anotacion de diagnostico: cuando Deepgram no logra descargar el audio no
+    // llama al webhook ni avisa, asi que sin esto no hay forma de saber que se
+    // le pidio ni que contesto.
+    let respuestaDeepgram: unknown = null;
+    try {
+      respuestaDeepgram = await respuesta.clone().json();
+    } catch {
+      respuestaDeepgram = (await respuesta.clone().text().catch(() => "")).slice(0, 300);
+    }
+    await put(
+      `diagnostico/${transcripcionId}.json`,
+      JSON.stringify({
+        id: transcripcionId,
+        cuando: new Date().toISOString(),
+        host,
+        urlDelAudioEnviada: urlAudioParaDeepgram,
+        archivoEnElAlmacen: archivoEnAlmacen,
+        urlDelBlobOriginal: datos.modo === "blob" ? datos.url : null,
+        estadoDeepgram: respuesta.status,
+        respuestaDeepgram,
+        sinVocabulario: avisoVocabulario !== null,
+      }),
+      { access: "private", addRandomSuffix: false, allowOverwrite: true },
+    ).catch(() => {});
+
     return NextResponse.json({
       status: "procesando",
       id: transcripcionId,
