@@ -111,6 +111,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Diagnostico: si la escritura en Blob falla, el navegador se queda
+  // sondeando sin saber por que. El mensaje solo lo puede ver quien traiga una
+  // firma valida, es decir quien ya conoce la clave del servidor.
+  const conDiagnostico = async (accion: () => Promise<unknown>) => {
+    try {
+      await accion();
+      return null;
+    } catch (e) {
+      const detalle = e instanceof Error ? e.message : String(e);
+      console.error("Fallo al guardar el resultado:", detalle);
+      return NextResponse.json(
+        { error: "No se pudo guardar el resultado.", detalle },
+        { status: 500 },
+      );
+    }
+  };
+
   const intervenciones = agruparTurnos(normalizarDeepgram(body));
 
   if (intervenciones.length === 0) {
@@ -124,7 +141,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  await guardar(id, {
+  const fallo = await conDiagnostico(() =>
+    guardar(id, {
     status: "completado",
     intervenciones,
     // El aviso viaja en la URL del callback: si Deepgram rechazo la lista de
@@ -140,7 +158,9 @@ export async function POST(request: Request) {
       intervenciones: intervenciones.length,
       terminos_de_vocabulario: sinVocabulario ? 0 : VOCABULARIO.length,
     },
-  });
+    }),
+  );
+  if (fallo) return fallo;
 
   await borrarAudio();
   await limpiarHuerfanos();
