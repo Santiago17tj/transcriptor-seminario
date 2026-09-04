@@ -100,6 +100,24 @@ export function firmarCallback(
     .slice(0, 32);
 }
 
+/**
+ * Firma del enlace de descarga que se le pasa a Deepgram.
+ *
+ * Mismo secreto que el webhook. Va aparte para que una firma de descarga no
+ * pueda reutilizarse como firma de webhook ni al reves.
+ */
+export function firmarDescarga(secreto: string, archivo: string): string {
+  return createHmac("sha256", secreto)
+    .update(`descarga|${archivo}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
+/** Ruta del archivo dentro del almacen, a partir de su URL. */
+export function archivoDeUrl(url: string): string {
+  return new URL(url).pathname.replace(/^\/+/, "");
+}
+
 /** Comparacion en tiempo constante, para no filtrar la firma a base de intentos. */
 export function firmaValida(esperada: string, recibida: string | null): boolean {
   if (!recibida || recibida.length !== esperada.length) return false;

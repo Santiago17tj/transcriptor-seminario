@@ -22,10 +22,12 @@ import {
   type RespuestaDeepgram,
 } from "@/lib/formato";
 import {
+  archivoDeUrl,
   codigoCorrecto,
   esHostLocal,
   esUrlDeBlob,
   firmarCallback,
+  firmarDescarga,
   hostPublico,
 } from "@/lib/seguridad";
 
@@ -169,11 +171,22 @@ export async function POST(request: Request) {
   let cuerpoDeepgram: BodyInit;
 
   if (datos.modo === "blob") {
+    // A Deepgram no se le pasa la URL del almacenamiento, porque si el almacen
+    // es privado no puede descargarla: hace un GET sin credenciales, recibe un
+    // rechazo y ni siquiera avisa, dejando la app esperando para siempre. Se le
+    // pasa un enlace firmado a /api/audio, que le sirve el archivo.
+    const archivo = archivoDeUrl(datos.url);
+    const enlace = new URL(`https://${host}/api/audio`);
+    enlace.searchParams.set("archivo", archivo);
+    enlace.searchParams.set("firma", firmarDescarga(clave, archivo));
+
     cabeceras = {
       Authorization: `Token ${clave}`,
       "Content-Type": "application/json",
     };
-    cuerpoDeepgram = JSON.stringify({ url: datos.url });
+    cuerpoDeepgram = JSON.stringify({
+      url: esLocal ? datos.url : enlace.toString(),
+    });
   } else {
     const buffer = Buffer.from(await datos.audio.arrayBuffer());
     cabeceras = {
