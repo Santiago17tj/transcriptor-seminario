@@ -260,25 +260,37 @@ export async function POST(request: Request) {
     } catch {
       respuestaDeepgram = (await respuesta.clone().text().catch(() => "")).slice(0, 300);
     }
-    await put(
-      `diagnostico/${transcripcionId}.json`,
-      JSON.stringify({
-        id: transcripcionId,
-        cuando: new Date().toISOString(),
-        host,
-        urlDelAudioEnviada: urlAudioParaDeepgram,
-        archivoEnElAlmacen: archivoEnAlmacen,
-        urlDelBlobOriginal: datos.modo === "blob" ? datos.url : null,
-        estadoDeepgram: respuesta.status,
-        respuestaDeepgram,
-        sinVocabulario: avisoVocabulario !== null,
-      }),
-      { access: "private", addRandomSuffix: false, allowOverwrite: true },
-    ).catch(() => {});
+    const anotacion = {
+      id: transcripcionId,
+      cuando: new Date().toISOString(),
+      host,
+      urlDelAudioEnviada: urlAudioParaDeepgram,
+      archivoEnElAlmacen: archivoEnAlmacen,
+      urlDelBlobOriginal: datos.modo === "blob" ? datos.url : null,
+      estadoDeepgram: respuesta.status,
+      respuestaDeepgram,
+      sinVocabulario: avisoVocabulario !== null,
+    };
 
+    // Sin .catch mudo: si la anotacion no se puede guardar hay que enterarse.
+    let anotacionGuardada: string | null = null;
+    try {
+      await put(
+        `diagnostico/${transcripcionId}.json`,
+        JSON.stringify(anotacion),
+        { access: "private", addRandomSuffix: false, allowOverwrite: true },
+      );
+    } catch (e) {
+      anotacionGuardada = e instanceof Error ? e.message : String(e);
+      console.error("No se pudo anotar el diagnostico:", anotacionGuardada);
+    }
+
+    // El diagnostico viaja tambien en la respuesta: asi se puede leer desde la
+    // pestana Red del navegador sin depender del almacenamiento.
     return NextResponse.json({
       status: "procesando",
       id: transcripcionId,
+      diagnostico: { ...anotacion, errorAlAnotar: anotacionGuardada },
     });
   }
 

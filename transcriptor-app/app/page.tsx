@@ -65,6 +65,7 @@ export default function Pagina() {
   const codigo = codigoEditado ?? codigoRecordado;
 
   const [progreso, setProgreso] = useState(0);
+  const [subido, setSubido] = useState(false);
   const [mensaje, setMensaje] = useState(MENSAJES_ESPERA[0]);
   const [error, setError] = useState<{ texto: string; detalle?: string } | null>(
     null,
@@ -77,16 +78,20 @@ export default function Pagina() {
 
   const inputArchivoRef = useRef<HTMLInputElement>(null);
 
-  // Mensajes rotativos mientras se espera, para que no parezca colgado.
+  // Mensajes rotativos SOLO mientras se espera a Deepgram.
+  //
+  // Antes rotaban desde el primer segundo y pisaban el progreso real de la
+  // subida: la pantalla decia "Casi listo..." con el archivo al 40%. Con
+  // archivos de decenas de megas eso es enganoso y hace parecer que se colgo.
   useEffect(() => {
-    if (paso !== "procesando") return;
+    if (paso !== "procesando" || !subido) return;
     let i = 0;
     const t = setInterval(() => {
       i = Math.min(i + 1, MENSAJES_ESPERA.length - 1);
       setMensaje(MENSAJES_ESPERA[i]);
     }, 12000);
     return () => clearInterval(t);
-  }, [paso]);
+  }, [paso, subido]);
 
   const orden = useMemo(() => hablantesEnOrden(intervenciones), [intervenciones]);
 
@@ -123,7 +128,8 @@ export default function Pagina() {
     if (!archivo) return;
     setError(null);
     setProgreso(0);
-    setMensaje(MENSAJES_ESPERA[0]);
+    setSubido(false);
+    setMensaje("Subiendo el audio…");
     setPaso("procesando");
 
     try {
@@ -140,16 +146,24 @@ export default function Pagina() {
       const blob = await upload(archivo.name, archivo, {
         access: "public",
         handleUploadUrl: "/api/subir",
+        // Sin esto, los 75 MB van en una sola peticion y cualquier bache de red
+        // la tumba entera. Por partes se sube en trozos y se puede reintentar.
+        multipart: true,
         // El servidor comprueba el codigo ANTES de dar permiso de subida, para
         // que nadie sin codigo pueda llenar el almacenamiento.
         clientPayload: codigo.trim(),
         onUploadProgress: (e) => {
           const pct = Math.round(e.percentage);
           setProgreso(pct);
-          if (pct >= 100) setMensaje("Audio subido. Transcribiendo…");
+          setMensaje(
+            pct >= 100
+              ? "Audio subido. Enviando a Deepgram…"
+              : `Subiendo el audio… ${pct}%`,
+          );
         },
       });
       blobUrl = blob.url;
+      setSubido(true);
     } catch (e) {
       // Si el codigo esta mal, no tiene sentido reintentar por el otro camino:
       // volveria a fallar despues de subir el archivo entero.
@@ -270,6 +284,18 @@ export default function Pagina() {
           setPaso("hablantes");
           return;
         }
+
+        // El servidor respondio algo que no entendemos. Antes se seguia de
+        // largo y se reintentaba subiendo el archivo entero otra vez por el
+        // camino viejo, en silencio: la pantalla se quedaba igual, girando,
+        // mientras por detras se resubian decenas de megas. Mejor parar aqui.
+        setError({
+          texto: "El servidor respondió de una forma inesperada.",
+          detalle:
+            "Respuesta recibida: " + JSON.stringify(cuerpo).slice(0, 300),
+        });
+        setPaso("inicio");
+        return;
       } catch (e) {
         const msg =
           e instanceof Error && e.name === "TimeoutError"
@@ -370,6 +396,7 @@ export default function Pagina() {
     setAviso(null);
     setError(null);
     setProgreso(0);
+    setSubido(false);
     if (inputArchivoRef.current) inputArchivoRef.current.value = "";
     setPaso("inicio");
   };
@@ -515,11 +542,12 @@ export default function Pagina() {
           <div>
             <p className="text-lg font-medium">{mensaje}</p>
             <p className="mt-1 text-sm text-slate-500">
-              Una sesión de dos horas tarda entre uno y tres minutos. No cierres
-              esta pantalla.
+              {subido
+                ? "Una sesión de dos horas tarda entre uno y tres minutos. No cierres esta pantalla."
+                : "Subir una grabación de 75 MB puede tardar varios minutos según tu conexión. No cierres esta pantalla."}
             </p>
           </div>
-          {progreso > 0 && progreso < 100 && (
+          {!subido && (
             <div className="mx-auto w-full max-w-xs">
               <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
                 <div
