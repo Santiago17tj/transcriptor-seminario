@@ -81,17 +81,21 @@ export function esHostLocal(host: string): boolean {
  * Deepgram no firma sus callbacks, asi que la firma va en la propia URL: se
  * calcula con la clave de Deepgram como secreto, de modo que no hace falta
  * configurar ninguna variable de entorno nueva. Sin esto, cualquiera podria
- * llamar a /api/callback y escribir resultados falsos o pedir el borrado de
- * archivos que no le pertenecen.
+ * llamar a /api/callback y escribir resultados falsos.
+ *
+ * Solo se firman el id y la marca de vocabulario, no la URL del audio: esa URL
+ * hace un viaje de ida y vuelta por Deepgram, y si volviera recodificada la
+ * firma no cuadraria y el resultado se perderia en silencio. El borrado del
+ * audio no queda desprotegido por eso: 'esUrlDeBlob' limita que se pueda pedir
+ * el borrado de cualquier cosa que no sea del propio almacenamiento.
  */
 export function firmarCallback(
   secreto: string,
   id: string,
-  audioUrl: string,
   sinVocabulario: boolean,
 ): string {
   return createHmac("sha256", secreto)
-    .update(`${id}|${audioUrl}|${sinVocabulario ? "1" : "0"}`)
+    .update(`${id}|${sinVocabulario ? "1" : "0"}`)
     .digest("hex")
     .slice(0, 32);
 }

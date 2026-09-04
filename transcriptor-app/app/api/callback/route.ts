@@ -34,13 +34,16 @@ export const runtime = "nodejs";
 const HORAS_DE_VIDA = 24;
 
 async function guardar(id: string, contenido: Record<string, unknown>) {
-  await put(rutaResultado(id), JSON.stringify(contenido), {
+  // Si esto falla, el navegador se quedaria sondeando para siempre sin saber
+  // por que. Se deja explotar para que quede en los registros de Vercel.
+  const guardado = await put(rutaResultado(id), JSON.stringify(contenido), {
     access: "public",
     addRandomSuffix: false,
+    allowOverwrite: true,
     contentType: "application/json",
-  }).catch((e) => {
-    console.error("No se pudo guardar el resultado en Blob:", e);
   });
+  console.log("Resultado guardado en", guardado.pathname);
+  return guardado;
 }
 
 /**
@@ -76,7 +79,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Servidor sin configurar" }, { status: 500 });
   }
 
-  const esperada = firmarCallback(clave, id, audioUrl, sinVocabulario);
+  const esperada = firmarCallback(clave, id, sinVocabulario);
   if (!firmaValida(esperada, params.get("firma"))) {
     // Sin ruido en la respuesta: quien llame sin firma no merece pistas.
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });

@@ -143,12 +143,7 @@ export async function POST(request: Request) {
 
     if (conCallback && !esLocal && datos.modo === "blob") {
       const sinVocabulario = !conVocabulario;
-      const firma = firmarCallback(
-        clave,
-        transcripcionId,
-        datos.url,
-        sinVocabulario,
-      );
+      const firma = firmarCallback(clave, transcripcionId, sinVocabulario);
       const cb = new URL(`https://${host}/api/callback`);
       cb.searchParams.set("id", transcripcionId);
       cb.searchParams.set("audioUrl", datos.url);

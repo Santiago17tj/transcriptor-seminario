@@ -13,21 +13,25 @@
 
 import { NextResponse } from "next/server";
 import { list, del } from "@vercel/blob";
-import { esUuid, rutaResultado } from "@/lib/seguridad";
+import { esUuid } from "@/lib/seguridad";
 
 export const runtime = "nodejs";
 
 /**
  * Busca el resultado de UNA transcripcion.
  *
- * Se compara el nombre completo y no el prefijo: 'list' hace busqueda por
- * prefijo, asi que con un id de una sola letra devolveria la transcripcion de
- * otra persona.
+ * Lo que hace segura esta busqueda es que el id ya se validó como UUID: 'list'
+ * busca por prefijo, y sin esa validacion un id de una sola letra devolvia la
+ * transcripcion de otra persona. Con un UUID completo por delante, el prefijo
+ * no puede alcanzar el resultado de nadie mas.
+ *
+ * Se busca por el id y no por el nombre exacto del archivo a proposito: el
+ * almacenamiento puede devolver la ruta con alguna variacion, y una comparacion
+ * estricta dejaria al navegador sondeando para siempre.
  */
 async function buscarResultado(id: string) {
-  const ruta = rutaResultado(id);
-  const { blobs } = await list({ prefix: ruta, limit: 10 });
-  return blobs.find((b) => b.pathname === ruta) ?? null;
+  const { blobs } = await list({ prefix: `resultados/${id}`, limit: 10 });
+  return blobs[0] ?? null;
 }
 
 export async function GET(request: Request) {
