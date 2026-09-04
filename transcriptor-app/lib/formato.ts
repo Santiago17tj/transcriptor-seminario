@@ -264,7 +264,7 @@ export type DatosDocumento = {
   meta?: Record<string, string | number>;
 };
 
-/** Arma el documento Markdown final, listo para subir a Claude. */
+/** Arma el documento Markdown final: el insumo para redactar el acta. */
 export function construirMarkdown({
   intervenciones,
   nombres,

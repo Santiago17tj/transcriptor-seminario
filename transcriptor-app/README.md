@@ -2,7 +2,7 @@
 
 App web instalable que convierte la grabación de una sesión en un documento
 Markdown con hablantes separados, vocabulario técnico corregido, marcas de tiempo
-y decisiones resaltadas, listo para pasarle a Claude.
+y decisiones resaltadas: el insumo para redactar el acta de la sesión.
 
 Se abre desde el navegador del celular y se instala en la pantalla de inicio, así
 que se ve y se usa como una app normal. No hay que pasar por la Play Store.
@@ -21,8 +21,7 @@ que se ve y se usa como una app normal. No hay que pasar por la Play Store.
 4. Tocar **Transcribir** y esperar entre uno y tres minutos.
 5. La app muestra las primeras frases de cada voz detectada y pregunta quién es
    cada una. Escribir los nombres.
-6. **Copiar todo** y pegarlo en la conversación con Claude, diciéndole de qué
-   sesión se trata.
+6. **Copiar todo** o **Descargar**, y usar ese texto para redactar el acta.
 
 ### Instalarla en la pantalla de inicio
 

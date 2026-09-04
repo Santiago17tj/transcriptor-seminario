@@ -6,8 +6,8 @@ Herramienta para transcribir las sesiones semanales del trabajo de grado
 Toma la grabación de una sesión y produce un documento Markdown limpio, con los
 hablantes separados e identificados por nombre, el vocabulario técnico del
 proyecto bien reconocido, marcas de tiempo y las decisiones resaltadas. La salida
-está pensada para subirla directamente a una conversación con Claude, que la usa
-como insumo para redactar el acta.
+es el insumo con el que el equipo redacta el acta: ya trae quién dijo qué, en qué
+minuto, y las decisiones recogidas aparte.
 
 **Lo que hace:** transcribe, separa hablantes, marca decisiones y fragmentos dudosos.
 **Lo que no hace:** no redacta el acta. Eso se sigue haciendo aparte, ahora con
