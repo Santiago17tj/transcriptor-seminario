@@ -52,6 +52,12 @@ export async function POST(request: Request) {
             "application/octet-stream",
           ],
           maximumSizeInBytes: 100 * 1024 * 1024, // 100 MB
+          // El almacenamiento es publico mientras dura la transcripcion, asi
+          // que el nombre no puede ser adivinable: sin esto, un audio subido
+          // como 'seminario9.m4a' quedaria en una direccion que cualquiera
+          // podria escribir de memoria. El archivo se borra en cuanto Deepgram
+          // termina, pero durante esos minutos tiene que estar a salvo.
+          addRandomSuffix: true,
           tokenPayload: JSON.stringify({ origen: "transcriptor" }),
         };
       },
