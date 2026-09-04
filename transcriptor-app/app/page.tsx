@@ -144,7 +144,10 @@ export default function Pagina() {
       setMensaje("Subiendo el audio…");
       const { upload } = await import("@vercel/blob/client");
       const blob = await upload(archivo.name, archivo, {
-        access: "public",
+        // Privado: el almacen del proyecto esta configurado asi, y una
+        // grabacion de la sesion no tiene por que ser accesible desde fuera.
+        // Deepgram la lee a traves de /api/audio con un enlace firmado.
+        access: "private",
         handleUploadUrl: "/api/subir",
         // Sin esto, los 75 MB van en una sola peticion y cualquier bache de red
         // la tumba entera. Por partes se sube en trozos y se puede reintentar.
@@ -175,8 +178,18 @@ export default function Pagina() {
         setPaso("inicio");
         return;
       }
-      // Blob no esta configurado (falta BLOB_READ_WRITE_TOKEN) o fallo la
-      // subida. Caemos al metodo directo mas abajo.
+      // En local no hay almacenamiento configurado y el camino directo por
+      // FormData es el correcto. En produccion, en cambio, caer ahi significa
+      // resubir el archivo entero en silencio: mejor decir que fallo.
+      const enProduccion = !location.hostname.startsWith("localhost");
+      if (enProduccion) {
+        setError({
+          texto: "No se pudo subir el audio al almacenamiento.",
+          detalle: e instanceof Error ? e.message : String(e),
+        });
+        setPaso("inicio");
+        return;
+      }
     }
 
     // Si el Blob se subio bien, enviar solo la URL al servidor.

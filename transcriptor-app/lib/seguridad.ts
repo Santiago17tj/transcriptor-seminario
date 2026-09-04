@@ -25,14 +25,20 @@ export function esUuid(valor: string | null): valor is string {
   );
 }
 
-/** Solo se borran URLs que de verdad apunten al almacenamiento de Vercel Blob. */
+/**
+ * Solo se aceptan URLs que de verdad apunten al almacenamiento de Vercel Blob.
+ *
+ * Sirve tanto para almacenes publicos como privados: los primeros usan un
+ * dominio con '.public.' y los segundos no, asi que se comprueba el dominio
+ * comun a los dos.
+ */
 export function esUrlDeBlob(valor: string | null): valor is string {
   if (!valor) return false;
   try {
     const u = new URL(valor);
     return (
       u.protocol === "https:" &&
-      u.hostname.endsWith(".public.blob.vercel-storage.com")
+      u.hostname.endsWith(".blob.vercel-storage.com")
     );
   } catch {
     return false;
